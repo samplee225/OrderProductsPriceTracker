@@ -722,6 +722,50 @@ function updateCartUI() {
 }
 
 // ── Order Screen ────────────────────────────────────────────
+function getBunchInfo(item) {
+  const source = (item.Name || item.SKU || 'Product').toString().trim();
+  const match = source.match(/^([A-Za-z]+)\s*0*(\d+)/);
+  if (!match) return null;
+
+  const prefix = match[1].toUpperCase();
+  const number = parseInt(match[2], 10);
+  const start = Math.floor((number - 1) / 100) * 100 + 1;
+  const end = start + 99;
+
+  return {
+    key: `${prefix}-${start}`,
+    start,
+    label: `${prefix} ${formatBunchNo(start)} TO ${prefix} ${formatBunchNo(end)}`,
+  };
+}
+
+function formatBunchNo(value) {
+  return String(value).padStart(3, '0');
+}
+
+function getOrderPdfGroupedProductLines(items) {
+  const groups = items.reduce((acc, item) => {
+    const info = getBunchInfo(item);
+    const key = info ? info.key : 'other';
+    if (!acc[key]) {
+      acc[key] = {
+        label: info ? info.label : 'Other',
+        start: info ? info.start : Number.MAX_SAFE_INTEGER,
+        items: [],
+      };
+    }
+    acc[key].items.push(item);
+    return acc;
+  }, {});
+
+  return Object.values(groups)
+    .sort((a, b) => a.start - b.start || a.label.localeCompare(b.label))
+    .flatMap(group => [
+      group.label,
+      ...group.items.map(item => `${item.Name || item.SKU || 'Product'} X ${item.qty}`),
+    ]);
+}
+
 function getOrderTotals() {
   const items = Object.values(cart);
   const totalAv = items.reduce((sum, item) => sum + (getItemAv(item) * item.qty), 0);
@@ -1068,14 +1112,9 @@ function buildOrderPdf() {
   const ensureSpace = (neededHeight) => {
     if (y - neededHeight < bottom) newPage();
   };
-  const totalQty = items.reduce((sum, item) => sum + item.qty, 0);
 
   function drawHeader() {
-    addText(orderName || 'Stock IN & OUT', margin, y, 16, 'F2');
-    addText(`Total Parcel : ${totalQty}`, 342, y, 11, 'F2');
-    addLineShape(430, y - 2, right, y - 2);
-    y -= 22;
-    addText('Total : IN _______  OUT ________', margin, y, 10, 'F2');
+    addText(orderName || 'Order Summary', margin, y, 13, 'F2');
     addText(`DATE : ${today}`, 292, y, 10);
     addText('Prepaid by : ____________', 410, y, 10);
     y -= 18;
@@ -1090,7 +1129,7 @@ function buildOrderPdf() {
   } else {
     const groupedItems = groupCartItemsByType(items);
     Object.values(groupedItems).forEach(({ label: type, items: typeItems }) => {
-      const productLines = typeItems.map(item => `${item.Name || item.SKU || 'Product'} X ${item.qty}`);
+      const productLines = getOrderPdfGroupedProductLines(typeItems);
       const columns = 3;
       const rows = Math.max(1, Math.ceil(productLines.length / columns));
       const headerHeight = 24;
@@ -1112,11 +1151,6 @@ function buildOrderPdf() {
       y -= blockHeight + 16;
     });
   }
-
-  ensureSpace(52);
-  addText('STOCK IN  / OUT  :', margin, y, 12, 'F2');
-  y -= 18;
-  addLineShape(margin, y, right, y);
   if (ops.length) pages.push(ops);
 
   const objects = [];
