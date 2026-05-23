@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your Order</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="order-page">
+    <header class="order-page-header">
+      <div class="header-brand">
+        <span class="header-logo">Order Summary</span>
+        <span class="header-status">Review your order and share it</span>
+      </div>
+      <a href="index.html" class="btn-secondary">Back to shop</a>
+    </header>
+
+    <main class="order-page-body">
+      <section class="order-panel">
+        <div class="order-panel-title-row">
+          <div>
+            <p class="page-label">Order details</p>
+            <h1 class="order-page-title">Your Order</h1>
+          </div>
+          <a href="#summary-actions" class="text-link">Go to actions</a>
+        </div>
+
+        <div id="order-items-list" class="order-items order-items-full"></div>
+      </section>
+
+      <aside class="summary-panel" id="order-summary-panel">
+        <div class="summary-card">
+          <h2 class="summary-title">Order summary</h2>
+          <div class="summary-row">
+            <span>Products</span>
+            <strong id="summary-items">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>Subtotal</span>
+            <strong id="summary-subtotal">₹0.00</strong>
+          </div>
+          <div class="summary-row">
+            <span>Discount</span>
+            <strong id="summary-discount">-₹0.00</strong>
+          </div>
+          <div class="summary-row">
+            <span>Shipping</span>
+            <strong id="summary-shipping">₹0.00</strong>
+          </div>
+          <div class="summary-row total-row">
+            <span>Total</span>
+            <strong id="summary-total">₹0.00</strong>
+          </div>
+          <div class="summary-note">Taxes, discounts and shipping calculated at checkout.</div>
+
+          <div id="summary-actions" class="summary-actions">
+            <button class="btn-pdf" id="download-order-pdf">Download PDF</button>
+            <button class="btn-checkout" id="share-order">Share Order</button>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script>
+    const CART_STORAGE_KEY = 'orderCalcCart';
+    const fmt = n => '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    function loadCartItems() {
+      try {
+        const data = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || '{}');
+        return Object.values(data).filter(item => item && item.qty > 0);
+      } catch {
+        return [];
+      }
+    }
+
+    function renderOrderItems(items) {
+      const container = document.getElementById('order-items-list');
+      if (!items.length) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🛒</div><p>Your order is empty</p><span>Add products to the catalog to review them here.</span></div>';
+        return;
+      }
+      container.innerHTML = items.map(item => `
+        <article class="order-item">
+          ${item['Image URL'] ? `<img class="order-item-img" src="${item['Image URL']}" alt="${item.Name}" onerror="this.outerHTML='<div class=\\'product-img-placeholder\\'>📦</div>'">` : '<div class="product-img-placeholder">📦</div>'}
+          <div class="order-item-info">
+            <span class="order-item-name">${item.Name}</span>
+            <span class="order-item-meta">SKU: ${item.SKU || '—'} • Category: ${item.Category || 'Uncategorized'}</span>
+            <span class="order-item-meta">Qty: ${item.qty} • Price: ${fmt(item.Price || 0)}</span>
+          </div>
+          <div class="order-item-total-block">
+            <span class="order-item-total-label">Line total</span>
+            <strong>${fmt((parseFloat(item.Price) || 0) * item.qty)}</strong>
+          </div>
+        </article>
+      `).join('');
+    }
+
+    function renderSummary(items) {
+      const subtotal = items.reduce((sum, item) => sum + ((parseFloat(item.Price) || 0) * item.qty), 0);
+      const discount = 0;
+      const shipping = 0;
+      const tax = 0;
+      const total = subtotal - discount + shipping + tax;
+
+      document.getElementById('summary-items').textContent = items.length;
+      document.getElementById('summary-subtotal').textContent = fmt(subtotal);
+      document.getElementById('summary-discount').textContent = `-` + fmt(discount);
+      document.getElementById('summary-shipping').textContent = fmt(shipping);
+      document.getElementById('summary-total').textContent = fmt(total);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const items = loadCartItems();
+      renderOrderItems(items);
+      renderSummary(items);
+
+      document.getElementById('share-order').addEventListener('click', () => {
+        const text = items.map(item => `${item.Name} x${item.qty} = ${fmt((parseFloat(item.Price) || 0) * item.qty)}`).join('\n');
+        const shareText = `Your Order:\n${text}\n\nTotal: ${fmt(items.reduce((sum, item) => sum + ((parseFloat(item.Price) || 0) * item.qty), 0))}`;
+        if (navigator.share) navigator.share({ text: shareText }).catch(() => alert('Share not available.'));
+        else prompt('Copy order text', shareText);
+      });
+
+      document.getElementById('download-order-pdf').addEventListener('click', () => {
+        const itemsHtml = items.map(item => `<tr><td>${item.Name}</td><td>${item.qty}</td><td>${fmt(item.Price || 0)}</td><td>${fmt((parseFloat(item.Price) || 0) * item.qty)}</td></tr>`).join('');
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Invoice PDF</title>
+
+<style>
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: #f4f6f9;
+    color: #222;
+  }
+
+  /* A4 Page */
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    margin: auto;
+    background: #fff;
+    padding: 18mm;
+    position: relative;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 3px solid #1f4e79;
+    padding-bottom: 14px;
+    margin-bottom: 24px;
+  }
+
+  .company h1 {
+    margin: 0;
+    font-size: 30px;
+    color: #1f4e79;
+    letter-spacing: 1px;
+  }
+
+  .company p {
+    margin: 4px 0;
+    font-size: 13px;
+    color: #666;
+    line-height: 1.5;
+  }
+
+  .invoice-box {
+    text-align: right;
+  }
+
+  .invoice-box h2 {
+    margin: 0;
+    font-size: 28px;
+    color: #1f4e79;
+  }
+
+  .invoice-box p {
+    margin: 6px 0;
+    font-size: 13px;
+    color: #555;
+  }
+
+  /* Customer Info */
+  .info-section {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    gap: 30px;
+  }
+
+  .info-card {
+    flex: 1;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 14px;
+  }
+
+  .info-card h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 14px;
+    color: #1f4e79;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .info-card p {
+    margin: 5px 0;
+    font-size: 13px;
+    color: #444;
+    line-height: 1.5;
+  }
+
+  /* Table */
+  .table-wrapper {
+    margin-top: 10px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow: hidden;
+    border-radius: 10px;
+  }
+
+  thead {
+    background: #1f4e79;
+    color: white;
+  }
+
+  thead th {
+    padding: 14px 12px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+
+  tbody tr:nth-child(even) {
+    background: #f8fafc;
+  }
+
+  tbody td {
+    padding: 14px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 13px;
+    color: #333;
+  }
+
+  .text-right {
+    text-align: right;
+  }
+
+  .text-center {
+    text-align: center;
+  }
+
+  /* Summary */
+  .summary {
+    margin-top: 24px;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .summary-box {
+    width: 320px;
+    background: #f8fafc;
+    border: 1px solid #dbe3ec;
+    border-radius: 12px;
+    padding: 18px;
+  }
+
+  .summary-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+
+  .summary-row.total {
+    border-top: 2px solid #dbe3ec;
+    padding-top: 14px;
+    margin-top: 14px;
+    font-size: 18px;
+    font-weight: bold;
+    color: #1f4e79;
+  }
+
+  /* Footer */
+  .footer {
+    position: absolute;
+    bottom: 18mm;
+    left: 18mm;
+    right: 18mm;
+    border-top: 1px solid #ddd;
+    padding-top: 12px;
+    font-size: 12px;
+    color: #777;
+    text-align: center;
+  }
+
+  /* Print */
+  @media print {
+    body {
+      background: white;
+    }
+
+    .page {
+      margin: 0;
+      width: 100%;
+      min-height: auto;
+      box-shadow: none;
+    }
+  }
+</style>
+</head>
+
+<body>
+
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="company">
+      <h1>YOUR COMPANY</h1>
+      <p>
+        123 Business Street<br />
+        Surat, Gujarat, India<br />
+        support@company.com
+      </p>
+    </div>
+
+    <div class="invoice-box">
+      <h2>INVOICE</h2>
+      <p><strong>Invoice #:</strong> INV-001</p>
+      <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+    </div>
+  </div>
+
+  <!-- Customer Info -->
+  <div class="info-section">
+
+    <div class="info-card">
+      <h3>Bill To</h3>
+      <p><strong>Customer Name</strong></p>
+      <p>customer@email.com</p>
+      <p>+91 9876543210</p>
+    </div>
+
+    <div class="info-card">
+      <h3>Payment Info</h3>
+      <p><strong>Method:</strong> Online Payment</p>
+      <p><strong>Status:</strong> Paid</p>
+      <p><strong>Order ID:</strong> #ORD-1024</p>
+    </div>
+
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th class="text-center">Qty</th>
+          <th class="text-right">Price</th>
+          <th class="text-right">Total</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        ${itemsHtml}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Summary -->
+  <div class="summary">
+    <div class="summary-box">
+
+      <div class="summary-row">
+        <span>Subtotal</span>
+        <span>
+          ${fmt(
+            items.reduce(
+              (sum, item) =>
+                sum + ((parseFloat(item.Price) || 0) * item.qty),
+              0
+            )
+          )}
+        </span>
+      </div>
+
+      <div class="summary-row">
+        <span>Tax</span>
+        <span>${fmt(0)}</span>
+      </div>
+
+      <div class="summary-row total">
+        <span>Grand Total</span>
+        <span>
+          ${fmt(
+            items.reduce(
+              (sum, item) =>
+                sum + ((parseFloat(item.Price) || 0) * item.qty),
+              0
+            )
+          )}
+        </span>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>`;
+        const blob = new Blob([html], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'order-summary.html';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      });
+    });
+  </script>
+</body>
+</html>
