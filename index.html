@@ -185,6 +185,15 @@
         </div>
       </div>
 
+      <div class="order-manager">
+        <label class="order-switcher-field" for="cart-order-select">
+          <span>Active order</span>
+          <select id="cart-order-select"></select>
+        </label>
+        <button class="btn-secondary order-new-btn" id="cart-new-order-btn" type="button">New</button>
+        <button class="clear-cart-btn order-delete-btn" id="cart-delete-order-btn" type="button">Delete</button>
+      </div>
+
       <label class="order-name-field cart-order-name-field" for="cart-order-name-input">
         <span>Order name</span>
         <input id="cart-order-name-input" type="text" placeholder="Enter order name" autocomplete="off" />
@@ -228,6 +237,15 @@
             <span>Order name</span>
             <input id="order-name-input" type="text" placeholder="Enter order name" autocomplete="off" />
           </label>
+
+          <div class="order-manager order-page-manager">
+            <label class="order-switcher-field" for="order-page-order-select">
+              <span>Active order</span>
+              <select id="order-page-order-select"></select>
+            </label>
+            <button class="btn-secondary order-new-btn" id="order-page-new-order-btn" type="button">New</button>
+            <button class="clear-cart-btn order-delete-btn" id="order-page-delete-order-btn" type="button">Delete</button>
+          </div>
 
           <div id="order-page-items-list" class="order-items order-items-full"></div>
         </section>

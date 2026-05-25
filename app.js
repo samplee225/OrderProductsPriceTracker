@@ -13,29 +13,225 @@ let shippingAmount = 0;
 let categoryPrices = {}; // { normalized type/category: pricePerAv }
 let usingCSVUrl = '';
 let orderName = '';
+let orders = [];
+let activeOrderId = '';
 
 const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1kPT4_l7zaNnqgTMbU5e_9INI22iRco6rDKvhQ6mflXs/edit?gid=0#gid=0';
 const CART_STORAGE_KEY = 'orderCalcCart';
+const ORDERS_STORAGE_KEY = 'orderCalcOrders';
+const ACTIVE_ORDER_STORAGE_KEY = 'orderCalcActiveOrderId';
+const CLIENT_ID_STORAGE_KEY = 'orderCalcClientId';
+const API_BASE_URL = window.location.protocol === 'file:' ? 'http://localhost:3000/api' : '/api';
+let saveOrdersTimer = null;
+let databaseAvailable = true;
 
-function saveCartState() {
+function getClientId() {
+  let clientId = localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+  if (!clientId) {
+    clientId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(CLIENT_ID_STORAGE_KEY, clientId);
+  }
+  return clientId;
+}
+
+function normalizeStoredOrders(storedOrders) {
+  return Array.isArray(storedOrders) ? storedOrders.filter(order => order && order.id) : [];
+}
+
+function createBlankOrder(name = '') {
+  const timestamp = Date.now();
+  return {
+    id: `order-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    cart: {},
+    categoryPrices: {},
+    discountPct: 0,
+    shippingAmount: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function getActiveOrder() {
+  return orders.find(order => order.id === activeOrderId) || orders[0] || null;
+}
+
+function captureActiveOrder() {
+  const order = getActiveOrder();
+  if (!order) return;
+  order.name = orderName;
+  order.cart = cart;
+  order.categoryPrices = categoryPrices;
+  order.discountPct = discountPct;
+  order.shippingAmount = shippingAmount;
+  order.updatedAt = Date.now();
+}
+
+function hydrateActiveOrder() {
+  const order = getActiveOrder();
+  if (!order) return;
+  activeOrderId = order.id;
+  orderName = order.name || '';
+  cart = order.cart || {};
+  categoryPrices = order.categoryPrices || {};
+  discountPct = parseFloat(order.discountPct) || 0;
+  shippingAmount = parseFloat(order.shippingAmount) || 0;
+  [cartOrderNameInput, orderNameInput].forEach(input => {
+    if (input) input.value = orderName;
+  });
+}
+
+function saveOrdersState() {
+  if (!orders.length) return;
+  captureActiveOrder();
   try {
-    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
+    localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(orders));
+    localStorage.setItem(ACTIVE_ORDER_STORAGE_KEY, activeOrderId);
   } catch (err) {
-    console.warn('Unable to save cart state', err);
+    console.warn('Unable to save order state', err);
+  }
+  scheduleDatabaseSave();
+}
+
+function loadOrdersState() {
+  try {
+    const storedOrders = JSON.parse(localStorage.getItem(ORDERS_STORAGE_KEY) || '[]');
+    orders = normalizeStoredOrders(storedOrders);
+    activeOrderId = localStorage.getItem(ACTIVE_ORDER_STORAGE_KEY) || '';
+
+    if (!orders.length) {
+      const stored = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || '{}');
+      const migratedCart = Object.keys(stored || {}).reduce((acc, sku) => {
+        const item = stored[sku];
+        if (item && item.SKU && item.qty > 0) acc[sku] = item;
+        return acc;
+      }, {});
+      const firstOrder = createBlankOrder('Order 1');
+      firstOrder.cart = migratedCart;
+      orders = [firstOrder];
+      activeOrderId = firstOrder.id;
+    }
+
+    if (!orders.some(order => order.id === activeOrderId)) activeOrderId = orders[0].id;
+    hydrateActiveOrder();
+  } catch (err) {
+    orders = [createBlankOrder('Order 1')];
+    activeOrderId = orders[0].id;
+    hydrateActiveOrder();
   }
 }
 
-function loadCartState() {
+async function loadOrdersFromDatabase() {
+  if (!databaseAvailable) return;
   try {
-    const stored = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || '{}');
-    cart = Object.keys(stored).reduce((acc, sku) => {
-      const item = stored[sku];
-      if (item && item.SKU && item.qty > 0) acc[sku] = item;
-      return acc;
-    }, {});
+    const res = await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(getClientId())}`);
+    if (res.status === 404) return;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const dbOrders = normalizeStoredOrders(data.orders);
+    if (!dbOrders.length) return;
+
+    orders = dbOrders;
+    activeOrderId = data.activeOrderId && dbOrders.some(order => order.id === data.activeOrderId)
+      ? data.activeOrderId
+      : dbOrders[0].id;
+    hydrateActiveOrder();
+    localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(orders));
+    localStorage.setItem(ACTIVE_ORDER_STORAGE_KEY, activeOrderId);
+    renderOrderSwitcher();
+    updateCartUI();
+    refreshVisibleProductControls();
+    if (orderScreen.classList.contains('active')) renderOrderPage();
   } catch (err) {
-    cart = {};
+    databaseAvailable = false;
+    console.info('Order database unavailable, using local storage only.', err.message);
   }
+}
+
+function scheduleDatabaseSave() {
+  if (!databaseAvailable || !orders.length) return;
+  clearTimeout(saveOrdersTimer);
+  saveOrdersTimer = setTimeout(saveOrdersToDatabase, 450);
+}
+
+async function saveOrdersToDatabase() {
+  if (!databaseAvailable || !orders.length) return;
+  try {
+    const res = await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(getClientId())}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orders, activeOrderId }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    databaseAvailable = false;
+    console.info('Unable to save orders to database, using local storage only.', err.message);
+  }
+}
+
+function getOrderDisplayName(order, index) {
+  const totalQty = Object.values(order.cart || {}).reduce((sum, item) => sum + (parseInt(item.qty, 10) || 0), 0);
+  const name = (order.name || '').trim() || `Order ${index + 1}`;
+  return `${name} (${totalQty})`;
+}
+
+function renderOrderSwitcher() {
+  [cartOrderSelect, orderPageOrderSelect].forEach(select => {
+    if (!select) return;
+    const previous = select.value;
+    select.innerHTML = orders.map((order, index) => (
+      `<option value="${escapeHtml(order.id)}">${escapeHtml(getOrderDisplayName(order, index))}</option>`
+    )).join('');
+    select.value = orders.some(order => order.id === activeOrderId) ? activeOrderId : previous;
+  });
+  const disableDelete = orders.length <= 1;
+  [cartDeleteOrderBtn, orderPageDeleteOrderBtn].forEach(btn => {
+    if (btn) btn.disabled = disableDelete;
+  });
+}
+
+function refreshVisibleProductControls() {
+  filteredProducts.forEach(product => {
+    refreshProductCard(product.SKU);
+    refreshQuickAddItem(product.SKU);
+  });
+}
+
+function syncActiveOrderViews() {
+  hydrateActiveOrder();
+  renderOrderSwitcher();
+  updateCartUI();
+  refreshVisibleProductControls();
+  if (orderScreen.classList.contains('active')) renderOrderPage();
+}
+
+function switchOrder(orderId) {
+  if (orderId === activeOrderId || !orders.some(order => order.id === orderId)) return;
+  captureActiveOrder();
+  activeOrderId = orderId;
+  syncActiveOrderViews();
+}
+
+function createNewOrder() {
+  captureActiveOrder();
+  const nextOrder = createBlankOrder(`Order ${orders.length + 1}`);
+  orders.push(nextOrder);
+  activeOrderId = nextOrder.id;
+  syncActiveOrderViews();
+  showToast('New order created', 'success');
+}
+
+function deleteActiveOrder() {
+  if (orders.length <= 1) {
+    showToast('Keep at least one order', 'error');
+    return;
+  }
+  captureActiveOrder();
+  const deletedIndex = Math.max(0, orders.findIndex(order => order.id === activeOrderId));
+  orders = orders.filter(order => order.id !== activeOrderId);
+  activeOrderId = (orders[deletedIndex] || orders[deletedIndex - 1] || orders[0]).id;
+  syncActiveOrderViews();
+  showToast('Order deleted', 'info');
 }
 
 // ── Sample Data ────────────────────────────────────────────
@@ -83,6 +279,12 @@ const viewOrderBtn     = document.getElementById('view-order-btn');
 const orderBackBtn     = document.getElementById('order-back-btn');
 const cartOrderNameInput = document.getElementById('cart-order-name-input');
 const orderNameInput   = document.getElementById('order-name-input');
+const cartOrderSelect = document.getElementById('cart-order-select');
+const orderPageOrderSelect = document.getElementById('order-page-order-select');
+const cartNewOrderBtn = document.getElementById('cart-new-order-btn');
+const orderPageNewOrderBtn = document.getElementById('order-page-new-order-btn');
+const cartDeleteOrderBtn = document.getElementById('cart-delete-order-btn');
+const orderPageDeleteOrderBtn = document.getElementById('order-page-delete-order-btn');
 const orderPageItemsList = document.getElementById('order-page-items-list');
 const orderPageSummaryItems = document.getElementById('order-page-summary-items');
 const orderPageSummarySubtotal = document.getElementById('order-page-summary-subtotal');
@@ -302,7 +504,7 @@ async function fetchFromSheet(url) {
 
 // ── Screen Switching ───────────────────────────────────────
 function showApp(products) {
-  loadCartState();
+  loadOrdersState();
   allProducts = products;
   activeType = 'all';
   setupScreen.classList.remove('active');
@@ -313,15 +515,14 @@ function showApp(products) {
   filterAndRender();
   productCountBadge.textContent = `${products.length} product${products.length !== 1 ? 's' : ''}`;
   updateCartUI();
+  loadOrdersFromDatabase();
 }
 
 function showSetup() {
   appScreen.classList.remove('active');
   orderScreen.classList.remove('active');
   setupScreen.classList.add('active');
-  cart = {};
   activeType = 'all';
-  updateCartUI();
 }
 
 function showAppLoading() {
@@ -658,6 +859,7 @@ function renderCartItem(item) {
       <div class="cart-item-name">${item.Name}</div>
       <div class="cart-item-price">${fmtAv(getItemAv(item))}</div>
     </div>
+    <div class="cart-item-total">${fmt(getItemTotal(item))}</div>
     <div class="cart-item-controls">
       <button class="cart-qty-btn" data-action="dec" data-sku="${item.SKU}">−</button>
       <input class="cart-qty-input" type="number" min="0" max="${getStockNum(item)}" value="${item.qty}" data-sku="${item.SKU}" aria-label="Quantity">
@@ -670,7 +872,8 @@ function updateCartUI() {
   const items = Object.values(cart);
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
 
-  saveCartState();
+  saveOrdersState();
+  renderOrderSwitcher();
 
   // Badge
   cartBadge.textContent = totalQty;
@@ -700,11 +903,13 @@ function updateCartUI() {
     const groupedItems = groupCartItemsByCategory(items);
     cartItemsList.innerHTML = Object.values(groupedItems).map(({ label: category, items: categoryItems }) => {
       const categoryQty = categoryItems.reduce((sum, item) => sum + item.qty, 0);
+      const categoryTotal = categoryItems.reduce((sum, item) => sum + getItemTotal(item), 0);
 
       return `<section class="cart-category-group">
         <div class="cart-category-header">
           <span class="cart-category-name">${category}</span>
-          <span class="cart-category-meta">${categoryQty} item${categoryQty !== 1 ? 's' : ''}</span>
+          <span class="cart-category-total">${fmt(categoryTotal)}</span>
+          <span class="cart-category-meta">${categoryQty} product${categoryQty !== 1 ? 's' : ''}</span>
         </div>
         ${categoryItems.map(renderCartItem).join('')}
       </section>`;
@@ -735,6 +940,7 @@ function getBunchInfo(item) {
   return {
     key: `${prefix}-${start}`,
     start,
+    end,
     label: `${prefix} ${formatBunchNo(start)} TO ${prefix} ${formatBunchNo(end)}`,
   };
 }
@@ -743,13 +949,14 @@ function formatBunchNo(value) {
   return String(value).padStart(3, '0');
 }
 
-function getOrderPdfGroupedProductLines(items) {
+function getOrderPdfBunchRows(items) {
   const groups = items.reduce((acc, item) => {
     const info = getBunchInfo(item);
     const key = info ? info.key : 'other';
     if (!acc[key]) {
       acc[key] = {
         label: info ? info.label : 'Other',
+        cellLabel: info ? String(info.end) : 'Other',
         start: info ? info.start : Number.MAX_SAFE_INTEGER,
         items: [],
       };
@@ -760,10 +967,10 @@ function getOrderPdfGroupedProductLines(items) {
 
   return Object.values(groups)
     .sort((a, b) => a.start - b.start || a.label.localeCompare(b.label))
-    .flatMap(group => [
-      group.label,
-      ...group.items.map(item => `${item.Name || item.SKU || 'Product'} X ${item.qty}`),
-    ]);
+    .map(group => ({
+      label: group.cellLabel,
+      products: group.items.map(item => `${item.Name || item.SKU || 'Product'} X ${item.qty}`),
+    }));
 }
 
 function getOrderTotals() {
@@ -785,6 +992,8 @@ function syncOrderNameInputs(sourceInput) {
   [cartOrderNameInput, orderNameInput].forEach(input => {
     if (input !== sourceInput) input.value = orderName;
   });
+  saveOrdersState();
+  renderOrderSwitcher();
 }
 
 function renderOrderPage() {
@@ -932,10 +1141,21 @@ orderBackBtn.addEventListener('click', showShopPage);
 orderDiscountInput.addEventListener('input', () => {
   discountPct = Math.min(100, Math.max(0, parseFloat(orderDiscountInput.value) || 0));
   updateOrderSummaryTotals();
+  saveOrdersState();
 });
 orderShippingInput.addEventListener('input', () => {
   shippingAmount = Math.max(0, parseFloat(orderShippingInput.value) || 0);
   updateOrderSummaryTotals();
+  saveOrdersState();
+});
+[cartOrderSelect, orderPageOrderSelect].forEach(select => {
+  select.addEventListener('change', () => switchOrder(select.value));
+});
+[cartNewOrderBtn, orderPageNewOrderBtn].forEach(btn => {
+  btn.addEventListener('click', createNewOrder);
+});
+[cartDeleteOrderBtn, orderPageDeleteOrderBtn].forEach(btn => {
+  btn.addEventListener('click', deleteActiveOrder);
 });
 
 // Swipe down to close
@@ -952,6 +1172,8 @@ clearCartBtn.addEventListener('click', () => {
   categoryPrices = {};
   discountPct = 0;
   shippingAmount = 0;
+  orderName = '';
+  [cartOrderNameInput, orderNameInput].forEach(input => { input.value = ''; });
   updateCartUI();
   // Refresh all product cards
   filteredProducts.forEach(p => {
@@ -1129,11 +1351,16 @@ function buildOrderPdf() {
   } else {
     const groupedItems = groupCartItemsByType(items);
     Object.values(groupedItems).forEach(({ label: type, items: typeItems }) => {
-      const productLines = getOrderPdfGroupedProductLines(typeItems);
+      const bunchRows = getOrderPdfBunchRows(typeItems);
       const columns = 3;
-      const rows = Math.max(1, Math.ceil(productLines.length / columns));
+      const bunchLabelWidth = 58;
       const headerHeight = 24;
-      const blockHeight = headerHeight + 18 + rows * rowHeight;
+      const bodyTopPadding = 10;
+      const bodyBottomPadding = 8;
+      const rowGap = 2;
+      const rowHeights = bunchRows.map(row => Math.max(rowHeight + 8, Math.ceil(row.products.length / columns) * rowHeight + bodyTopPadding + bodyBottomPadding));
+      const bodyHeight = rowHeights.reduce((sum, height) => sum + height, 0) + Math.max(0, rowHeights.length - 1) * rowGap;
+      const blockHeight = headerHeight + Math.max(rowHeight + 12, bodyHeight);
       ensureSpace(blockHeight + 18);
 
       const boxTop = y;
@@ -1142,14 +1369,30 @@ function buildOrderPdf() {
       addText(type, margin + 10, boxTop - 16, 13, 'F2');
       addLineShape(margin, boxTop - headerHeight, right, boxTop - headerHeight);
 
-      const colWidth = (right - margin - 24) / columns;
-      productLines.forEach((line, index) => {
-        const col = index % columns;
-        const row = Math.floor(index / columns);
-        addText(line, margin + 10 + col * colWidth, boxTop - headerHeight - 20 - row * rowHeight, 11);
+      const productLeft = margin + bunchLabelWidth;
+      const productColWidth = (right - productLeft - 18) / columns;
+      let rowTop = boxTop - headerHeight;
+      bunchRows.forEach((bunchRow, rowIndex) => {
+        const currentRowHeight = rowHeights[rowIndex];
+        const rowBottom = rowTop - currentRowHeight;
+        addLineShape(productLeft, rowTop, productLeft, rowBottom);
+        addText(bunchRow.label, margin + 12, rowTop - 18, 11, 'F2');
+        bunchRow.products.forEach((line, index) => {
+          const col = index % columns;
+          const productRow = Math.floor(index / columns);
+          addText(line, productLeft + 12 + col * productColWidth, rowTop - 18 - productRow * rowHeight, 11);
+        });
+        if (rowIndex < bunchRows.length - 1) addLineShape(margin, rowBottom, right, rowBottom);
+        rowTop = rowBottom - rowGap;
       });
       y -= blockHeight + 16;
     });
+  }
+
+  const totalQty = items.reduce((sum, item) => sum + item.qty, 0);
+  if (items.length) {
+    const footerY = Math.max(26, bottom - 20);
+    addText(`TOTAL PRODUCTS : ${totalQty}`, right - 150, footerY, 10, 'F2');
   }
   if (ops.length) pages.push(ops);
 
