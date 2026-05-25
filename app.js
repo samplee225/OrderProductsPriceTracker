@@ -17,25 +17,21 @@ let orders = [];
 let activeOrderId = '';
 
 const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1kPT4_l7zaNnqgTMbU5e_9INI22iRco6rDKvhQ6mflXs/edit?gid=0#gid=0';
-const CART_STORAGE_KEY = 'orderCalcCart';
-const ORDERS_STORAGE_KEY = 'orderCalcOrders';
-const ACTIVE_ORDER_STORAGE_KEY = 'orderCalcActiveOrderId';
-const CLIENT_ID_STORAGE_KEY = 'orderCalcClientId';
-const API_BASE_URL = window.location.protocol === 'file:' ? 'http://localhost:3000/api' : '/api';
+const API_BASE_URL = ['file:', 'http:'].includes(window.location.protocol) &&
+  !['localhost:3000', '127.0.0.1:3000'].includes(window.location.host)
+  ? 'http://localhost:3000/api'
+  : '/api';
+const CUSTOMER_ORDERS_URL = `${API_BASE_URL}/customer-orders`;
 let saveOrdersTimer = null;
 let databaseAvailable = true;
-
-function getClientId() {
-  let clientId = localStorage.getItem(CLIENT_ID_STORAGE_KEY);
-  if (!clientId) {
-    clientId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    localStorage.setItem(CLIENT_ID_STORAGE_KEY, clientId);
-  }
-  return clientId;
-}
+let isHydratingOrders = false;
 
 function normalizeStoredOrders(storedOrders) {
-  return Array.isArray(storedOrders) ? storedOrders.filter(order => order && order.id) : [];
+  return Array.isArray(storedOrders)
+    ? storedOrders
+      .filter(order => order && order.id)
+      .map(order => ({ ...order, status: order.status === 'completed' ? 'completed' : 'pending' }))
+    : [];
 }
 
 function createBlankOrder(name = '') {
@@ -47,6 +43,7 @@ function createBlankOrder(name = '') {
     categoryPrices: {},
     discountPct: 0,
     shippingAmount: 0,
+    status: 'pending',
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -54,6 +51,27 @@ function createBlankOrder(name = '') {
 
 function getActiveOrder() {
   return orders.find(order => order.id === activeOrderId) || orders[0] || null;
+}
+
+function resetOrderState() {
+  orders = [];
+  activeOrderId = '';
+  orderName = '';
+  cart = {};
+  categoryPrices = {};
+  discountPct = 0;
+  shippingAmount = 0;
+  [cartOrderNameInput, orderNameInput].forEach(input => {
+    if (input) input.value = '';
+  });
+}
+
+function ensureActiveOrder() {
+  if (getActiveOrder()) return;
+  const firstOrder = createBlankOrder(`Customer Order ${orders.length + 1 || 1}`);
+  orders.push(firstOrder);
+  activeOrderId = firstOrder.id;
+  hydrateActiveOrder();
 }
 
 function captureActiveOrder() {
@@ -64,12 +82,16 @@ function captureActiveOrder() {
   order.categoryPrices = categoryPrices;
   order.discountPct = discountPct;
   order.shippingAmount = shippingAmount;
+  order.status = order.status === 'completed' ? 'completed' : 'pending';
   order.updatedAt = Date.now();
 }
 
 function hydrateActiveOrder() {
   const order = getActiveOrder();
-  if (!order) return;
+  if (!order) {
+    resetOrderState();
+    return;
+  }
   activeOrderId = order.id;
   orderName = order.name || '';
   cart = order.cart || {};
@@ -82,69 +104,44 @@ function hydrateActiveOrder() {
 }
 
 function saveOrdersState() {
+  if (isHydratingOrders) return;
   if (!orders.length) return;
   captureActiveOrder();
-  try {
-    localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(orders));
-    localStorage.setItem(ACTIVE_ORDER_STORAGE_KEY, activeOrderId);
-  } catch (err) {
-    console.warn('Unable to save order state', err);
-  }
   scheduleDatabaseSave();
 }
 
 function loadOrdersState() {
-  try {
-    const storedOrders = JSON.parse(localStorage.getItem(ORDERS_STORAGE_KEY) || '[]');
-    orders = normalizeStoredOrders(storedOrders);
-    activeOrderId = localStorage.getItem(ACTIVE_ORDER_STORAGE_KEY) || '';
-
-    if (!orders.length) {
-      const stored = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || '{}');
-      const migratedCart = Object.keys(stored || {}).reduce((acc, sku) => {
-        const item = stored[sku];
-        if (item && item.SKU && item.qty > 0) acc[sku] = item;
-        return acc;
-      }, {});
-      const firstOrder = createBlankOrder('Order 1');
-      firstOrder.cart = migratedCart;
-      orders = [firstOrder];
-      activeOrderId = firstOrder.id;
-    }
-
-    if (!orders.some(order => order.id === activeOrderId)) activeOrderId = orders[0].id;
-    hydrateActiveOrder();
-  } catch (err) {
-    orders = [createBlankOrder('Order 1')];
-    activeOrderId = orders[0].id;
-    hydrateActiveOrder();
-  }
+  resetOrderState();
 }
 
 async function loadOrdersFromDatabase() {
   if (!databaseAvailable) return;
   try {
-    const res = await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(getClientId())}`);
-    if (res.status === 404) return;
+    isHydratingOrders = true;
+    const res = await fetch(CUSTOMER_ORDERS_URL);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const dbOrders = normalizeStoredOrders(data.orders);
-    if (!dbOrders.length) return;
 
     orders = dbOrders;
-    activeOrderId = data.activeOrderId && dbOrders.some(order => order.id === data.activeOrderId)
+    activeOrderId = dbOrders.length && data.activeOrderId && dbOrders.some(order => order.id === data.activeOrderId)
       ? data.activeOrderId
-      : dbOrders[0].id;
+      : (dbOrders[0] && dbOrders[0].id) || '';
     hydrateActiveOrder();
-    localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(orders));
-    localStorage.setItem(ACTIVE_ORDER_STORAGE_KEY, activeOrderId);
     renderOrderSwitcher();
     updateCartUI();
     refreshVisibleProductControls();
     if (orderScreen.classList.contains('active')) renderOrderPage();
   } catch (err) {
     databaseAvailable = false;
-    console.info('Order database unavailable, using local storage only.', err.message);
+    resetOrderState();
+    renderOrderSwitcher();
+    updateCartUI();
+    refreshVisibleProductControls();
+    showToast('Server orders unavailable. Start the backend and refresh.', 'error');
+    console.info('Order database unavailable.', err.message);
+  } finally {
+    isHydratingOrders = false;
   }
 }
 
@@ -157,7 +154,7 @@ function scheduleDatabaseSave() {
 async function saveOrdersToDatabase() {
   if (!databaseAvailable || !orders.length) return;
   try {
-    const res = await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(getClientId())}`, {
+    const res = await fetch(CUSTOMER_ORDERS_URL, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ orders, activeOrderId }),
@@ -165,14 +162,118 @@ async function saveOrdersToDatabase() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   } catch (err) {
     databaseAvailable = false;
-    console.info('Unable to save orders to database, using local storage only.', err.message);
+    showToast('Could not save to server', 'error');
+    console.info('Unable to save orders to database.', err.message);
   }
 }
 
 function getOrderDisplayName(order, index) {
   const totalQty = Object.values(order.cart || {}).reduce((sum, item) => sum + (parseInt(item.qty, 10) || 0), 0);
-  const name = (order.name || '').trim() || `Order ${index + 1}`;
+  const name = (order.name || '').trim() || `Customer Order ${index + 1}`;
   return `${name} (${totalQty})`;
+}
+
+function getOrderStatus(order) {
+  return order && order.status === 'completed' ? 'completed' : 'pending';
+}
+
+function getOrderStatusLabel(order) {
+  return getOrderStatus(order) === 'completed' ? 'Completed' : 'Pending';
+}
+
+function formatOrderDate(value) {
+  const date = new Date(value || Date.now());
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function getOrderCategories(order) {
+  const categories = Object.values(order.cart || {}).map(item => getCategoryLabel(item));
+  return [...new Set(categories)].filter(Boolean);
+}
+
+function getOrderSummary(order) {
+  const items = Object.values(order.cart || {});
+  const itemCount = items.reduce((sum, item) => sum + (parseInt(item.qty, 10) || 0), 0);
+  const prices = order.categoryPrices || {};
+  const subtotal = items.reduce((sum, item) => {
+    const label = getCategoryLabel(item);
+    const price = parseFloat(prices[getCategoryKey(label)]) || 0;
+    return sum + (price * getItemAv(item) * (parseInt(item.qty, 10) || 0));
+  }, 0);
+  const discount = subtotal * ((parseFloat(order.discountPct) || 0) / 100);
+  const shipping = parseFloat(order.shippingAmount) || 0;
+  return {
+    itemCount,
+    total: subtotal - discount + shipping,
+  };
+}
+
+function renderCustomerOrderList() {
+  if (!customerOrderCount || !customerOrderList) return;
+  customerOrderCount.textContent = orders.length;
+
+  if (!orders.length) {
+    customerOrderList.innerHTML = '<span class="cart-name-empty">No customer orders saved</span>';
+    return;
+  }
+
+  customerOrderList.innerHTML = orders.map((order, index) => {
+    const { itemCount, total } = getOrderSummary(order);
+    const name = (order.name || '').trim() || `Customer Order ${index + 1}`;
+    const categories = getOrderCategories(order);
+    const categoryText = categories.length ? categories.join(', ') : 'No category';
+    const activeClass = order.id === activeOrderId ? ' active' : '';
+    const status = getOrderStatus(order);
+    return `
+      <button class="customer-order-item${activeClass}" type="button" data-order-id="${escapeHtml(order.id)}">
+        <span class="customer-order-name">${escapeHtml(name)}</span>
+        <span class="customer-order-status ${status}">${getOrderStatusLabel(order)}</span>
+        <span class="customer-order-meta">${itemCount} item${itemCount !== 1 ? 's' : ''} • Created ${formatOrderDate(order.createdAt)}</span>
+        <span class="customer-order-categories">${escapeHtml(categoryText)}</span>
+        <strong class="customer-order-total">${fmt(total)}</strong>
+      </button>
+    `;
+  }).join('');
+
+  customerOrderList.querySelectorAll('.customer-order-item').forEach(item => {
+    item.addEventListener('click', () => {
+      switchOrder(item.dataset.orderId);
+      closeCustomerOrdersPopup();
+    });
+  });
+}
+
+function renderActiveOrderMeta() {
+  if (!activeOrderMeta) return;
+  const order = getActiveOrder();
+  if (!order) {
+    activeOrderMeta.innerHTML = '';
+    return;
+  }
+  const categories = getOrderCategories(order);
+  activeOrderMeta.innerHTML = `
+    <span class="order-status-dot ${getOrderStatus(order)}">${getOrderStatusLabel(order)}</span>
+    <span>Created ${formatOrderDate(order.createdAt)}</span>
+    <span>${escapeHtml(categories.length ? categories.join(', ') : 'No category')}</span>
+  `;
+}
+
+function updateOrderStatusUI() {
+  const order = getActiveOrder();
+  const status = getOrderStatus(order);
+  if (orderStatusPill) {
+    orderStatusPill.textContent = getOrderStatusLabel(order);
+    orderStatusPill.classList.toggle('completed', status === 'completed');
+  }
+  if (confirmOrderBtn) {
+    confirmOrderBtn.textContent = status === 'completed' ? 'Order Completed' : 'Confirm Order';
+    confirmOrderBtn.disabled = !order || status === 'completed';
+  }
+  renderActiveOrderMeta();
 }
 
 function renderOrderSwitcher() {
@@ -188,6 +289,8 @@ function renderOrderSwitcher() {
   [cartDeleteOrderBtn, orderPageDeleteOrderBtn].forEach(btn => {
     if (btn) btn.disabled = disableDelete;
   });
+  renderCustomerOrderList();
+  updateOrderStatusUI();
 }
 
 function refreshVisibleProductControls() {
@@ -214,11 +317,24 @@ function switchOrder(orderId) {
 
 function createNewOrder() {
   captureActiveOrder();
-  const nextOrder = createBlankOrder(`Order ${orders.length + 1}`);
+  const nextOrder = createBlankOrder(`Customer Order ${orders.length + 1}`);
   orders.push(nextOrder);
   activeOrderId = nextOrder.id;
   syncActiveOrderViews();
-  showToast('New order created', 'success');
+  showToast('New customer order created', 'success');
+}
+
+function completeActiveOrder() {
+  const order = getActiveOrder();
+  if (!order) return;
+  if (getOrderStatus(order) === 'completed') return;
+  captureActiveOrder();
+  order.status = 'completed';
+  order.completedAt = Date.now();
+  order.updatedAt = Date.now();
+  syncActiveOrderViews();
+  saveOrdersState();
+  showToast('Order completed', 'success');
 }
 
 function deleteActiveOrder() {
@@ -266,12 +382,18 @@ const quickAddViewCart = document.getElementById('quick-add-view-cart');
 const productsArea   = document.getElementById('products-area');
 const productsGrid   = document.getElementById('products-grid');
 const emptyState     = document.getElementById('empty-state');
+const customerOrdersBtn = document.getElementById('customer-orders-btn');
+const customerOrdersModal = document.getElementById('customer-orders-modal');
+const closeCustomerOrdersModal = document.getElementById('close-customer-orders-modal');
 const cartSheet      = document.getElementById('cart-sheet');
 const cartOverlay    = document.getElementById('cart-overlay');
 const cartToggleBtn  = document.getElementById('cart-toggle-btn');
 const cartBadge      = document.getElementById('cart-badge');
+const customerOrderCount = document.getElementById('customer-order-count');
+const customerOrderList = document.getElementById('customer-order-list');
 const cartNameCount  = document.getElementById('cart-name-count');
 const cartNameList   = document.getElementById('cart-name-list');
+const activeOrderMeta = document.getElementById('active-order-meta');
 const cartItemsList  = document.getElementById('cart-items-list');
 const cartEmpty      = document.getElementById('cart-empty');
 const clearCartBtn   = document.getElementById('clear-cart-btn');
@@ -295,6 +417,8 @@ const orderPageSummaryTotal = document.getElementById('order-page-summary-total'
 const orderDiscountInput = document.getElementById('order-discount-input');
 const orderShippingInput = document.getElementById('order-shipping-input');
 const orderPagePriceList = document.getElementById('order-page-price-list');
+const orderStatusPill = document.getElementById('order-status-pill');
+const confirmOrderBtn = document.getElementById('confirm-order-btn');
 const downloadOrderPdfBtn = document.getElementById('download-order-pdf-btn');
 const shareOrderPageBtn = document.getElementById('share-order-page-btn');
 const backBtn          = document.getElementById('back-btn');
@@ -754,6 +878,7 @@ function createProductCard(product) {
 
 // ── Cart Logic ─────────────────────────────────────────────
 function addToCart(product) {
+  ensureActiveOrder();
   const stock = getStockNum(product);
   if (stock === 0) return;
   if (cart[product.SKU]) {
@@ -988,6 +1113,7 @@ function getOrderName() {
 }
 
 function syncOrderNameInputs(sourceInput) {
+  ensureActiveOrder();
   orderName = sourceInput.value.trim();
   [cartOrderNameInput, orderNameInput].forEach(input => {
     if (input !== sourceInput) input.value = orderName;
@@ -999,6 +1125,7 @@ function syncOrderNameInputs(sourceInput) {
 function renderOrderPage() {
   const { items } = getOrderTotals();
   const groupedItems = groupCartItemsByCategory(items);
+  updateOrderStatusUI();
 
   if (!items.length) {
     orderPagePriceList.innerHTML = '';
@@ -1097,11 +1224,27 @@ function closeCart() {
   document.body.style.overflow = '';
 }
 
+function openCustomerOrdersPopup() {
+  renderCustomerOrderList();
+  customerOrdersModal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeCustomerOrdersPopup() {
+  customerOrdersModal.classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
 cartToggleBtn.addEventListener('click', () => {
   cartSheet.classList.contains('open') ? closeCart() : openCart();
 });
 quickAddViewCart.addEventListener('click', openCart);
 cartOverlay.addEventListener('click', closeCart);
+customerOrdersBtn.addEventListener('click', openCustomerOrdersPopup);
+closeCustomerOrdersModal.addEventListener('click', closeCustomerOrdersPopup);
+customerOrdersModal.addEventListener('click', e => {
+  if (e.target === customerOrdersModal) closeCustomerOrdersPopup();
+});
 
 // ── Shop Layout ────────────────────────────────────────────
 const shopContent = document.querySelector('.shop-content');
@@ -1139,11 +1282,13 @@ orderBackBtn.addEventListener('click', showShopPage);
   });
 });
 orderDiscountInput.addEventListener('input', () => {
+  ensureActiveOrder();
   discountPct = Math.min(100, Math.max(0, parseFloat(orderDiscountInput.value) || 0));
   updateOrderSummaryTotals();
   saveOrdersState();
 });
 orderShippingInput.addEventListener('input', () => {
+  ensureActiveOrder();
   shippingAmount = Math.max(0, parseFloat(orderShippingInput.value) || 0);
   updateOrderSummaryTotals();
   saveOrdersState();
@@ -1445,6 +1590,7 @@ function downloadOrderPdf() {
   showToast('Downloaded order summary', 'success');
 }
 
+confirmOrderBtn.addEventListener('click', completeActiveOrder);
 downloadOrderPdfBtn.addEventListener('click', downloadOrderPdf);
 
 // ── Share Order ────────────────────────────────────────────

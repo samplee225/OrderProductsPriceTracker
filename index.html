@@ -94,6 +94,10 @@
         </div>
       </div>
       <div class="header-right">
+        <button class="customer-orders-btn" id="customer-orders-btn" type="button">
+          <span>Customers</span>
+          <strong id="customer-order-count">0</strong>
+        </button>
         <button class="icon-btn" id="fullscreen-btn" title="Fullscreen">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
@@ -187,17 +191,18 @@
 
       <div class="order-manager">
         <label class="order-switcher-field" for="cart-order-select">
-          <span>Active order</span>
+          <span>Customer orders</span>
           <select id="cart-order-select"></select>
         </label>
-        <button class="btn-secondary order-new-btn" id="cart-new-order-btn" type="button">New</button>
+        <button class="btn-secondary order-new-btn" id="cart-new-order-btn" type="button">New Customer</button>
         <button class="clear-cart-btn order-delete-btn" id="cart-delete-order-btn" type="button">Delete</button>
       </div>
 
       <label class="order-name-field cart-order-name-field" for="cart-order-name-input">
-        <span>Order name</span>
-        <input id="cart-order-name-input" type="text" placeholder="Enter order name" autocomplete="off" />
+        <span>Customer order name</span>
+        <input id="cart-order-name-input" type="text" placeholder="Enter customer order name" autocomplete="off" />
       </label>
+      <div class="active-order-meta" id="active-order-meta"></div>
 
       <div class="cart-items-container" id="cart-items-container">
         <div class="cart-empty-state" id="cart-empty">
@@ -230,20 +235,20 @@
               <p class="page-label">Order details</p>
               <h1 class="order-page-title">Your Order</h1>
             </div>
-            <a href="#order-page-actions" class="text-link">Go to actions</a>
+            <button class="order-status-pill" id="order-status-pill" type="button" disabled>Pending</button>
           </div>
 
           <label class="order-name-field" for="order-name-input">
-            <span>Order name</span>
-            <input id="order-name-input" type="text" placeholder="Enter order name" autocomplete="off" />
+            <span>Customer order name</span>
+            <input id="order-name-input" type="text" placeholder="Enter customer order name" autocomplete="off" />
           </label>
 
           <div class="order-manager order-page-manager">
             <label class="order-switcher-field" for="order-page-order-select">
-              <span>Active order</span>
+              <span>Customer orders</span>
               <select id="order-page-order-select"></select>
             </label>
-            <button class="btn-secondary order-new-btn" id="order-page-new-order-btn" type="button">New</button>
+            <button class="btn-secondary order-new-btn" id="order-page-new-order-btn" type="button">New Customer</button>
             <button class="clear-cart-btn order-delete-btn" id="order-page-delete-order-btn" type="button">Delete</button>
           </div>
 
@@ -289,6 +294,7 @@
             <div class="summary-note">Taxes, discounts and shipping calculated at checkout.</div>
 
             <div id="order-page-actions" class="summary-actions">
+              <button class="btn-confirm" id="confirm-order-btn" type="button">Confirm Order</button>
               <button class="btn-pdf" id="download-order-pdf-btn" type="button">Download PDF</button>
               <button class="btn-checkout" id="share-order-page-btn" type="button">Share Order</button>
             </div>
@@ -302,6 +308,22 @@
   <div class="toast-container" id="toast-container"></div>
 
   <!-- ===================== SHARE MODAL ===================== -->
+  <div class="modal-overlay customer-orders-overlay hidden" id="customer-orders-modal">
+    <div class="customer-orders-modal-panel">
+      <div class="share-modal-header">
+        <h3>Customer Orders</h3>
+        <button class="modal-close-btn" id="close-customer-orders-modal" type="button">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="customer-order-list customer-order-modal-list" id="customer-order-list">
+        <span class="cart-name-empty">No customer orders saved</span>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay hidden" id="share-modal-overlay">
     <div class="share-modal">
       <div class="share-modal-header">
