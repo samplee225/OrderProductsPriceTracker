@@ -26,6 +26,27 @@ let saveOrdersTimer = null;
 let databaseAvailable = true;
 let isHydratingOrders = false;
 
+// Probe the API health endpoint once on startup to avoid noisy 404/405 requests
+async function probeApi() {
+  // If API_BASE_URL is clearly a relative '/api' but we're on a static host, probe to detect availability
+  try {
+    const url = API_BASE_URL.replace(/\/$/, '') + '/health';
+    const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+    if (!res.ok) {
+      databaseAvailable = false;
+      console.info('API health check failed:', res.status);
+      showToast('Remote orders unavailable; using local storage only.', 'info');
+      return false;
+    }
+    // keep databaseAvailable true
+    return true;
+  } catch (err) {
+    databaseAvailable = false;
+    console.info('API health check error:', err && err.message ? err.message : err);
+    showToast('Remote orders unavailable; using local storage only.', 'info');
+    return false;
+  }
+}
 function normalizeStoredOrders(storedOrders) {
   return Array.isArray(storedOrders)
     ? storedOrders
@@ -639,7 +660,10 @@ function showApp(products) {
   filterAndRender();
   productCountBadge.textContent = `${products.length} product${products.length !== 1 ? 's' : ''}`;
   updateCartUI();
-  loadOrdersFromDatabase();
+  // Probe API availability first to avoid noisy errors on static hosts
+  probeApi().then(ok => {
+    if (ok) loadOrdersFromDatabase();
+  });
 }
 
 function showSetup() {
