@@ -1,17 +1,16 @@
 {
   "version": 2,
   "builds": [
-    { "src": "OrderProductsPriceTracker/api/**/*.js", "use": "@vercel/node" },
-    { "src": "OrderProductsPriceTracker/*.html", "use": "@vercel/static" },
-    { "src": "OrderProductsPriceTracker/*.css", "use": "@vercel/static" },
-    { "src": "OrderProductsPriceTracker/*.js", "use": "@vercel/static" }
+    { "src": "api/**/*.js", "use": "@vercel/node" },
+    { "src": "*.html", "use": "@vercel/static" },
+    { "src": "*.css", "use": "@vercel/static" },
+    { "src": "*.js", "use": "@vercel/static" }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "/OrderProductsPriceTracker/api/$1" },
-    { "src": "/(.*\\.css)", "dest": "/OrderProductsPriceTracker/$1" },
-    { "src": "/(.*\\.js)", "dest": "/OrderProductsPriceTracker/$1" },
-    { "src": "/order.html", "dest": "/OrderProductsPriceTracker/order.html" },
-    { "src": "/", "dest": "/OrderProductsPriceTracker/index.html" },
-    { "src": "/(.*)", "dest": "/OrderProductsPriceTracker/index.html" }
+    { "src": "/api/(.*)", "dest": "/api/$1" },
+    { "src": "/(.*\\.(?:css|js))", "dest": "/$1" },
+    { "src": "/order.html", "dest": "/order.html" },
+    { "src": "/", "dest": "/index.html" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
