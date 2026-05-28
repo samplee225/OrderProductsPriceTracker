@@ -17,35 +17,44 @@ let orders = [];
 let activeOrderId = '';
 
 const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1kPT4_l7zaNnqgTMbU5e_9INI22iRco6rDKvhQ6mflXs/edit?gid=0#gid=0';
-const API_BASE_URL = ['file:', 'http:'].includes(window.location.protocol) &&
-  !['localhost:3000', '127.0.0.1:3000'].includes(window.location.host)
-  ? 'http://localhost:3000/api'
-  : '/api';
-const CUSTOMER_ORDERS_URL = `${API_BASE_URL}/customer-orders`;
+let API_BASE_URL = '/api';
+let CUSTOMER_ORDERS_URL = `${API_BASE_URL}/customer-orders`;
 let saveOrdersTimer = null;
 let databaseAvailable = true;
 let isHydratingOrders = false;
 
+function setApiBaseUrl(baseUrl) {
+  API_BASE_URL = baseUrl.replace(/\/$/, '');
+  CUSTOMER_ORDERS_URL = `${API_BASE_URL}/customer-orders`;
+}
+
 // Probe the API health endpoint once on startup to avoid noisy 404/405 requests
 async function probeApi() {
-  // If API_BASE_URL is clearly a relative '/api' but we're on a static host, probe to detect availability
-  try {
-    const url = API_BASE_URL.replace(/\/$/, '') + '/health';
-    const res = await fetch(url, { method: 'GET', cache: 'no-store' });
-    if (!res.ok) {
-      databaseAvailable = false;
-      console.info('API health check failed:', res.status);
-      showToast('Remote orders unavailable; using local storage only.', 'info');
-      return false;
-    }
-    // keep databaseAvailable true
-    return true;
-  } catch (err) {
-    databaseAvailable = false;
-    console.info('API health check error:', err && err.message ? err.message : err);
-    showToast('Remote orders unavailable; using local storage only.', 'info');
-    return false;
+  const candidates = [API_BASE_URL];
+  if (window.location.protocol === 'file:' || ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+    ['3001', '3000'].forEach(port => {
+      const fallbackUrl = `http://localhost:${port}/api`;
+      if (!candidates.includes(fallbackUrl)) candidates.push(fallbackUrl);
+    });
   }
+
+  for (const baseUrl of candidates) {
+    try {
+      const url = baseUrl.replace(/\/$/, '') + '/health';
+      const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+      if (res.ok) {
+        setApiBaseUrl(baseUrl);
+        return true;
+      }
+      console.info('API health check failed:', url, res.status);
+    } catch (err) {
+      console.info('API health check error:', baseUrl, err && err.message ? err.message : err);
+    }
+  }
+
+  databaseAvailable = false;
+  showToast('Remote orders unavailable; using local storage only.', 'info');
+  return false;
 }
 function normalizeStoredOrders(storedOrders) {
   return Array.isArray(storedOrders)

@@ -190,12 +190,20 @@ async function start() {
     server = app.listen(PORT, () => {
       console.log(`OrderCalc running at http://localhost:${PORT} (env=${process.env.NODE_ENV || 'development'})`);
     });
+
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use. Stop the process using that port or set a different PORT.`);
+      } else {
+        console.error('Server error:', err);
+      }
+      process.exit(1);
+    });
   } catch (err) {
     console.error('Unable to connect to database or start server:', err);
     process.exit(1);
   }
 
-  // Graceful shutdown
   const shutdown = async (signal) => {
     console.log(`Received ${signal} — closing server`);
     try {
@@ -211,6 +219,17 @@ async function start() {
 
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGUSR2', () => {
+    shutdown('SIGUSR2').then(() => process.kill(process.pid, 'SIGUSR2'));
+  });
+  process.on('uncaughtException', async (err) => {
+    console.error('Uncaught exception:', err);
+    await shutdown('uncaughtException');
+  });
+  process.on('unhandledRejection', async (reason) => {
+    console.error('Unhandled rejection:', reason);
+    await shutdown('unhandledRejection');
+  });
 }
 
 start().catch(err => {
