@@ -1844,9 +1844,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
   .cart-name-sidebar {
     padding: 14px;
-    height: 150px;
-    max-height: 150px;
-    min-height: 150px;
+    height: 360px;
+    max-height: 360px;
+    min-height: 360px;
   }
 
   .cart-name-list {
@@ -1956,9 +1956,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 @media (max-width: 380px) {
   .setup-title { font-size: 30px; }
   .cart-name-sidebar {
-    height: 136px;
-    min-height: 136px;
-    max-height: 136px;
+    height: 360px;
+    min-height: 360px;
+    max-height: 360px;
   }
   .product-name { font-size: 12px; min-height: 32px; }
   .product-info { padding: 10px; }
@@ -2072,5 +2072,14 @@ button:focus-visible, input:focus-visible, select:focus-visible {
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .cart-name-sidebar,
+  .shop-content.products-hidden .cart-name-sidebar {
+    height: 360px !important;
+    min-height: 360px !important;
+    max-height: 360px !important;
   }
 }
