@@ -68,11 +68,44 @@
 
   <script>
     const CART_STORAGE_KEY = 'orderCalcCart';
-    const fmt = n => '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const ORDER_PAGE_STORAGE_KEY = 'orderCalcOrderPage';
+    let orderPageState = {};
+    const fmt = n => 'Rs. ' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtAv = n => 'Av. ' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    function getCategoryLabel(item) {
+      return (item.Type || item.Category || 'Uncategorized').toString().trim() || 'Uncategorized';
+    }
+
+    function getCategoryKey(label) {
+      return (label || 'uncategorized').toString().trim().toLowerCase();
+    }
+
+    function getItemAv(item) {
+      return parseFloat(item.Av || item.AV || item.av || item.Price || 0) || 0;
+    }
+
+    function getCategoryPrice(item) {
+      const prices = orderPageState.categoryPrices || {};
+      return parseFloat(prices[getCategoryKey(getCategoryLabel(item))]) || parseFloat(item.Price || 0) || 0;
+    }
+
+    function getItemTotal(item) {
+      return getCategoryPrice(item) * getItemAv(item) * (parseInt(item.qty, 10) || 0);
+    }
+
+    function loadOrderPageState() {
+      try {
+        return JSON.parse(localStorage.getItem(ORDER_PAGE_STORAGE_KEY) || '{}') || {};
+      } catch {
+        return {};
+      }
+    }
 
     function loadCartItems() {
       try {
-        const data = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || '{}');
+        orderPageState = loadOrderPageState();
+        const data = orderPageState.cart || JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || '{}');
         return Object.values(data).filter(item => item && item.qty > 0);
       } catch {
         return [];
@@ -90,25 +123,26 @@
           ${item['Image URL'] ? `<img class="order-item-img" src="${item['Image URL']}" alt="${item.Name}" onerror="this.outerHTML='<div class=\\'product-img-placeholder\\'>📦</div>'">` : '<div class="product-img-placeholder">📦</div>'}
           <div class="order-item-info">
             <span class="order-item-name">${item.Name}</span>
-            <span class="order-item-meta">SKU: ${item.SKU || '—'} • Category: ${item.Category || 'Uncategorized'}</span>
-            <span class="order-item-meta">Qty: ${item.qty} • Price: ${fmt(item.Price || 0)}</span>
+            <span class="order-item-meta">SKU: ${item.SKU || '-'} - Type: ${getCategoryLabel(item)}</span>
+            <span class="order-item-meta">Qty: ${item.qty} - ${fmtAv(getItemAv(item))} - Price: ${fmt(getCategoryPrice(item))}</span>
           </div>
           <div class="order-item-total-block">
             <span class="order-item-total-label">Line total</span>
-            <strong>${fmt((parseFloat(item.Price) || 0) * item.qty)}</strong>
+            <strong>${fmt(getItemTotal(item))}</strong>
           </div>
         </article>
       `).join('');
     }
 
     function renderSummary(items) {
-      const subtotal = items.reduce((sum, item) => sum + ((parseFloat(item.Price) || 0) * item.qty), 0);
-      const discount = 0;
-      const shipping = 0;
+      const subtotal = items.reduce((sum, item) => sum + getItemTotal(item), 0);
+      const discountPct = parseFloat(orderPageState.discountPct) || 0;
+      const discount = subtotal * (discountPct / 100);
+      const shipping = parseFloat(orderPageState.shippingAmount) || 0;
       const tax = 0;
       const total = subtotal - discount + shipping + tax;
 
-      document.getElementById('summary-items').textContent = items.length;
+      document.getElementById('summary-items').textContent = items.reduce((sum, item) => sum + (parseInt(item.qty, 10) || 0), 0);
       document.getElementById('summary-subtotal').textContent = fmt(subtotal);
       document.getElementById('summary-discount').textContent = `-` + fmt(discount);
       document.getElementById('summary-shipping').textContent = fmt(shipping);
@@ -121,14 +155,14 @@
       renderSummary(items);
 
       document.getElementById('share-order').addEventListener('click', () => {
-        const text = items.map(item => `${item.Name} x${item.qty} = ${fmt((parseFloat(item.Price) || 0) * item.qty)}`).join('\n');
-        const shareText = `Your Order:\n${text}\n\nTotal: ${fmt(items.reduce((sum, item) => sum + ((parseFloat(item.Price) || 0) * item.qty), 0))}`;
+        const text = items.map(item => `${item.Name} x${item.qty} = ${fmt(getItemTotal(item))}`).join('\n');
+        const shareText = `Your Order:\n${text}\n\nTotal: ${fmt(items.reduce((sum, item) => sum + getItemTotal(item), 0))}`;
         if (navigator.share) navigator.share({ text: shareText }).catch(() => alert('Share not available.'));
         else prompt('Copy order text', shareText);
       });
 
       document.getElementById('download-order-pdf').addEventListener('click', () => {
-        const itemsHtml = items.map(item => `<tr><td>${item.Name}</td><td>${item.qty}</td><td>${fmt(item.Price || 0)}</td><td>${fmt((parseFloat(item.Price) || 0) * item.qty)}</td></tr>`).join('');
+        const itemsHtml = items.map(item => `<tr><td>${item.Name}</td><td>${item.qty}</td><td>${fmt(getCategoryPrice(item))}</td><td>${fmt(getItemTotal(item))}</td></tr>`).join('');
         const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -404,7 +438,7 @@
           ${fmt(
             items.reduce(
               (sum, item) =>
-                sum + ((parseFloat(item.Price) || 0) * item.qty),
+                sum + getItemTotal(item),
               0
             )
           )}
@@ -422,7 +456,7 @@
           ${fmt(
             items.reduce(
               (sum, item) =>
-                sum + ((parseFloat(item.Price) || 0) * item.qty),
+                sum + getItemTotal(item),
               0
             )
           )}

@@ -19,6 +19,8 @@ let activeOrderId = '';
 const DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1kPT4_l7zaNnqgTMbU5e_9INI22iRco6rDKvhQ6mflXs/edit?gid=0#gid=0';
 let API_BASE_URL = '/api';
 let CUSTOMER_ORDERS_URL = `${API_BASE_URL}/customer-orders`;
+const CART_STORAGE_KEY = 'orderCalcCart';
+const ORDER_PAGE_STORAGE_KEY = 'orderCalcOrderPage';
 let saveOrdersTimer = null;
 let databaseAvailable = true;
 let isHydratingOrders = false;
@@ -1245,6 +1247,33 @@ function showShopPage() {
   updateCartUI();
 }
 
+function persistOrderPageState() {
+  captureActiveOrder();
+  const activeOrder = getActiveOrder();
+  const payload = {
+    activeOrderId,
+    order: activeOrder,
+    cart,
+    categoryPrices,
+    discountPct,
+    shippingAmount,
+    orderName,
+    savedAt: Date.now(),
+  };
+
+  try {
+    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
+    localStorage.setItem(ORDER_PAGE_STORAGE_KEY, JSON.stringify(payload));
+  } catch (err) {
+    console.info('Unable to save order page state.', err && err.message ? err.message : err);
+  }
+}
+
+function goToOrderHtml() {
+  persistOrderPageState();
+  window.location.href = 'order.html';
+}
+
 // ── Cart Panel ─────────────────────────────────────────────
 function openCart() {
   cartSheet.classList.add('open');
@@ -1304,7 +1333,7 @@ fullscreenBtn.addEventListener('click', () => {
   }
 });
 
-viewOrderBtn.addEventListener('click', showOrderPage);
+viewOrderBtn.addEventListener('click', goToOrderHtml);
 orderBackBtn.addEventListener('click', showShopPage);
 [cartOrderNameInput, orderNameInput].forEach(input => {
   input.addEventListener('input', () => syncOrderNameInputs(input));
